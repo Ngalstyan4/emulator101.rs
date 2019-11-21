@@ -4,7 +4,7 @@ use std::fs;
 
 #[derive(PartialEq)]
 #[derive(Debug)]
-enum PARITY {EVEN, ODD}
+enum PARITY {ODD, EVEN}
 
 impl Default for PARITY {
     fn default() -> Self {
@@ -36,7 +36,7 @@ impl std::fmt::Debug for CC {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         let z = if self.z {"z"} else {"."};
         let s = if self.s {"s"} else {"."};
-        let p = if self.p == PARITY::ODD {"p"} else {"."};
+        let p = if self.p == PARITY::EVEN {"p"} else {"."};
         let cy = if self.cy {"y"} else {"."};
         let pad = if self.pad != 0 {"^"} else {"."};
         write!(f, "{}{}{}{}{}",z,s,p,cy,pad)
@@ -97,6 +97,7 @@ impl std::fmt::Debug for State8080 {
         // Q:: can I make this type generic?
         fn _parity(num: u32, size: usize) -> PARITY{ // TODO:: parity broken look at instruction number 1522-1554
             let num_bits = size * 8;
+            assert!(num_bits <= 32);
             let s = format!("{:0>32b}", num);//.chars();//.skip(32 - num_bits);
             // HELP Q:: THis must be super super slow and inefficient.
             s.chars().skip(32-num_bits).fold(PARITY::EVEN, |acc,c| {if c == '1' {!acc} else {acc}})
@@ -400,7 +401,7 @@ fn main() {
         state.memory.0[i] = *c as u8;
     }
     print!("{}[2J", 27 as char);
-    for i in 0.. {
+    for i in 0..1550 {
         print!("{}\t",i);
         state.emulate();
     }
@@ -416,6 +417,12 @@ mod tests{
         use PARITY::*;
         assert_eq!(_parity(0, 0), EVEN);
         assert_eq!(_parity(0, 4), EVEN);
+        assert_eq!(_parity(0, 1), EVEN);
+        assert_eq!(_parity(1, 1), ODD);
+        assert_eq!(_parity(0x07, std::mem::size_of::<u8>()), ODD);
+        assert_eq!(_parity(0x06, std::mem::size_of::<u8>()), EVEN);
+        assert_eq!(_parity(0x05, std::mem::size_of::<u8>()), EVEN);
+
         assert_eq!(_parity(2, 2), ODD);// 2 = 0b10
         assert_eq!(_parity(0x00f000, 4), EVEN);
         assert_eq!(_parity(0x00f001, 4), ODD);
