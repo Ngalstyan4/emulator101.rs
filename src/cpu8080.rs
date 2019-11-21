@@ -226,8 +226,28 @@ impl State8080 {
         self.int_enable = false;
     }
 
+    fn _LogicFlagsA(&mut self) {
+        self.cc.cy = false;
+        self.cc.ac = 0;
+        self.cc.z = self.a == 0;
+        self.cc.s = 0x80 == (self.a & 0x80);
+        self.cc.p = _parity(self.a as u32, std::mem::size_of::<u8>())
+    }
+
+    fn _arithFlagsA(&mut self, res: u16) {
+        self.cc.cy = res > 0xff;
+        self.cc.z = (res & 0xff) == 0;
+        self.cc.s = 0x80 == (res & 0x80);
+        self.cc.p = _parity((res & 0xff) as u32, std::mem::size_of::<u8>());
+    }
+
     pub fn emulate(&mut self) {
         /* INSTRUCTION MACROS BEGIN */
+        macro_rules! DEREF_HL {
+            () => {
+                self.memory.0[(((self.h as u32) << 8) | (self.l as u32)) as usize]
+            };
+        }
         macro_rules! DIS {
                 ($fmt:expr) => (if State8080::DISASSEMBLE {print!(concat!($fmt,"{0: >21}")," "); println!("\t{:?}", self)});
                 ($fmt:expr, $($arg:tt)*) => (if State8080::DISASSEMBLE { print!($fmt, $($arg)*); println!("\t\t\t{:?}", self)});
@@ -328,6 +348,15 @@ impl State8080 {
             ($reg:ident) => {
                 self.$reg = self.$reg & self.$reg;
                 self._LogicFlagsA();
+            };
+        }
+
+        macro_rules! CMP {
+            ($reg:ident) => {
+                // log. or makes sure the result is never negative
+                // let res = (self.a as u16 | 0x0001) - self.$reg as u16;
+                let res = self.a as u16 - self.$reg as u16; // todo:: this may panic
+                self._arithFlagsA(res);
             };
         }
 
@@ -487,6 +516,10 @@ impl State8080 {
             0x7c => {
                 DIS!("MOV A,H");
                 MOVRR!(a, h);
+            },
+            0x7d => {
+                DIS!("MOV A,L");
+                MOVRR!(a, l);
             }
 
             0x7e => {
@@ -502,10 +535,54 @@ impl State8080 {
                 DIS!("XOR A");
                 XOR!(a);
             }
+            // 0xb8 	CMP B	1	Z, S, P, CY, AC	A - B
+            // 0xb9 	CMP C	1	Z, S, P, CY, AC	A - C
+            // 0xba 	CMP D	1	Z, S, P, CY, AC	A - D
+            // 0xbb 	CMP E	1	Z, S, P, CY, AC	A - E
+            // 0xbc 	CMP H	1	Z, S, P, CY, AC	A - H
+            // 0xbd 	CMP L	1	Z, S, P, CY, AC	A - L
+            // 0xbe 	CMP M	1	Z, S, P, CY, AC	A - (HL)
+            // 0xbf 	CMP A	1	Z, S, P, CY, AC	A - A
+            0xb8 => {
+                DIS!("CMP B");
+                CMP!(b);
+            }
+            0xb9 => {
+                DIS!("CMP C");
+                CMP!(c);
+            }
+            0xba => {
+                DIS!("CMP D");
+                CMP!(d);
+            }
+            0xbb => {
+                DIS!("CMP E");
+                CMP!(e);
+            }
+            0xbc => {
+                DIS!("CMP H");
+                CMP!(h);
+            }
+            0xbd => {
+                DIS!("CMP L");
+                CMP!(l);
+            }
+            0xbe => {
+                DIS!("CMP M");
+                let mem_hl = DEREF_HL!();
+                let res = self.a as u16 - mem_hl as u16;// todo: this may panic, see CMP!() as well
+                self._arithFlagsA(res);
+            }
+            0xbf => {
+                DIS!("CMP A");
+                CMP!(a);
+            }
+
             0xc1 => {
                 DIS!("POP B");
                 POP!(c, b);
             }
+
             0xc2 => {
                 let adr = (self.memory.0[(self.pc + 2) as usize] as u32) << 8
                     | (self.memory.0[(self.pc + 1) as usize] as u32);
@@ -548,10 +625,11 @@ impl State8080 {
                 return;
             }
             0xca => {
+                DIS!("JZ adr");
                 if self.cc.z {
                     self.pc = (((self.memory.0[(self.pc + 2) as usize] as u32) << 8)
-                        | self.memory.0[(self.pc + 1) as usize] as u32)
-                        as u16;
+                        | self.memory.0[(self.pc + 1) as usize] as u32) as u16;
+                return;
                 } else {
                     self.pc += 2;
                 }
@@ -568,25 +646,27 @@ impl State8080 {
                             let offset = ((self.d as u32) << 8) | (self.e as u32);
                             let mut bgn = (offset + 3) as usize;
                             while self.memory.0[bgn] != '$' as u8 {
-                                println!("{}", self.memory.0[bgn]);
+                                print!("{}", self.memory.0[bgn] as char);
                                 bgn += 1;
                             }
+                            println!();
                         } else if self.c == 2 {
                             //saw this in the inspected code, never saw it called
                             println!("print char routine called\n");
                         }
+                        std::process::exit(1);// todo handle the below if this iscommented out
                     } else if adr == 0 {
                         std::process::exit(1);
                     }
                 }
-                if cfg!(not(test)) {
-                    let ret = self.pc + 3; //todo:: may be a bug here q::
-                    self.memory.0[(self.sp - 1) as usize] = ((ret >> 8) & 0xff) as u8;
-                    self.memory.0[(self.sp - 2) as usize] = (ret & 0xff) as u8;
-                    self.sp -= 2;
-                    self.pc = adr as u16;
-                    return;
-                }
+
+                let ret = self.pc + 3; //todo:: may be a bug here q::
+                self.memory.0[(self.sp - 1) as usize] = ((ret >> 8) & 0xff) as u8;
+                self.memory.0[(self.sp - 2) as usize] = (ret & 0xff) as u8;
+                self.sp -= 2;
+                self.pc = adr as u16;
+                return;
+
             }
             0xd1 => {
                 DIS!("POP D");
@@ -603,6 +683,15 @@ impl State8080 {
             0xe1 => {
                 DIS!("POP H");
                 POP!(l, h);
+            },
+            0xe3 => {// XTHL	1		L <-> (SP); H <-> (SP+1) 
+                DIS!("XTHL");
+                let h = self.h;
+                let l = self.l;
+                self.l = self.memory.0[self.sp as usize];
+                self.memory.0[self.sp as usize] = l;
+                self.h = self.memory.0[(self.sp+1) as usize];
+                self.memory.0[self.sp as usize] = h;
             }
             0xe5 => {
                 DIS!("PUSH H");
@@ -662,16 +751,10 @@ impl State8080 {
         self.cycles += State8080::INSTR_CYCLES[opcode as usize] as u64;
     }
 
-    fn _LogicFlagsA(&mut self) {
-        self.cc.cy = false;
-        self.cc.ac = 0;
-        self.cc.z = self.a == 0;
-        self.cc.s = 0x80 == (self.a & 0x80);
-        self.cc.p = _parity(self.a as u32, std::mem::size_of::<u8>())
-    }
     fn _unimplemented_instruction(&self) {
         let opcode: u8 = self.memory.0[self.pc as usize];
-        println!("Unimplemented Instruction with opcode 0x{:0>2x}", opcode);
+        
+        println!("Unimplemented Instruction with opcode 0x{:0>2x} self: {:?}", opcode, self);
         std::process::exit(1);
     }
 
