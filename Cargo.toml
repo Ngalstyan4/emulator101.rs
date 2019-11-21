@@ -5,4 +5,4 @@ authors = ["Narek Galstyan <ngalstyan4@gmail.com>"]
 edition = "2018"
 
 [dependencies]
-framebuffer= "0.1.8"
+drawille = "0.2.3"

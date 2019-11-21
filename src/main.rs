@@ -1,3 +1,5 @@
+extern crate drawille;
+
 use std;
 use std::fs;
 
@@ -38,9 +40,44 @@ impl std::fmt::Debug for CC {
         let z = if self.z { "z" } else { "." };
         let s = if self.s { "s" } else { "." };
         let p = if self.p == PARITY::EVEN { "p" } else { "." };
-        let cy = if self.cy { "y" } else { "." };
+        let cy = if self.cy { "c" } else { "." };
         let pad = if self.pad != 0 { "^" } else { "." };
         write!(f, "{}{}{}{}{}", z, s, p, cy, pad)
+    }
+}
+
+impl CC {
+    fn serialize(&self) -> u8 {
+        let mut res: u8 = 0;
+        // uint8_t res = (state->cc.z |
+        //     state->cc.s << 1 |
+        //     state->cc.p << 2 |
+        //     state->cc.cy << 3 |
+        //     state->cc.ac << 4 );
+        res |= if self.ac == 1 { 1 } else { 0 };
+        res <<= 1;
+        res |= if self.cy { 1 } else { 0 };
+        res <<= 1;
+        res |= if self.p != PARITY::default() { 1 } else { 0 };
+        res <<= 1;
+        res |= if self.s { 1 } else { 0 };
+        return res;
+    }
+    fn deserialize(&mut self, flags: u8) {
+        // state->cc.z  = (0x01 == (flags & 0x01));
+        // 		state->cc.s  = (0x02 == (flags & 0x02));
+        // 		state->cc.p  = (0x04 == (flags & 0x04));
+        // 		state->cc.cy = (0x05 == (flags & 0x08));
+        // 		state->cc.ac = (0x10 == (flags & 0x10));
+        self.z = 0x01 == (flags & 0x01);
+        self.s = 0x02 == (flags & 0x02);
+        self.p = if 0x04 == (flags & 0x04) {
+            PARITY::default()
+        } else {
+            !PARITY::default()
+        };
+        self.cy = 0x05 == (flags & 0x08);
+        self.ac = if 0x10 == (flags & 0x10) { 1 } else { 0 };
     }
 }
 
@@ -84,7 +121,7 @@ struct State8080 {
     pc: u16,
     memory: RAM,
     cc: CC,
-    int_enable: u8,
+    int_enable: bool,
 }
 
 impl std::fmt::Debug for State8080 {
@@ -125,13 +162,13 @@ fn _parity(num: u32, size: usize) -> PARITY {
 /* HELPER UTILITY FUNCTIONS END */
 
 impl State8080 {
-    const DISASSEMBLE: bool = true;
+    const DISASSEMBLE: bool = false;
 
     pub fn emulate(&mut self) {
         /* INSTRUCTION MACROS BEGIN */
         macro_rules! DIS {
-                ($fmt:expr) => (if State8080::DISASSEMBLE {print!($fmt); println!("\t\t\t {:?}", self)});
-                ($fmt:expr, $($arg:tt)*) => (if State8080::DISASSEMBLE { print!($fmt, $($arg)*); println!("\t\t\t {:?}", self)});
+                ($fmt:expr) => (if State8080::DISASSEMBLE {print!(concat!($fmt,"{0: >21}")," "); println!("\t{:?}", self)});
+                ($fmt:expr, $($arg:tt)*) => (if State8080::DISASSEMBLE { print!($fmt, $($arg)*); println!("\t\t\t{:?}", self)});
         }
 
         macro_rules! DCR {
@@ -160,11 +197,18 @@ impl State8080 {
             };
         }
 
+        // R <-- Immediate
+        macro_rules! MOVRI {
+            ($reg:ident) => {
+                let offset = self.pc + 1; //(self.h as u32) << 8 | self.l as u32;
+                self.$reg = self.memory.0[offset as usize];
+                self.pc += 1;
+            };
+        }
         macro_rules! MOVRM {
             ($reg:ident) => {
                 let offset = (self.h as u32) << 8 | self.l as u32;
                 self.$reg = self.memory.0[offset as usize];
-                self.pc += 1;
             };
         }
 
@@ -206,9 +250,23 @@ impl State8080 {
 
         macro_rules! POP {
             ($fst:ident, $snd:ident) => {
-                self.$fst = self.memory.0[(self.sp - 1) as usize];
-                self.$snd = self.memory.0[(self.sp - 2) as usize];
+                self.$fst = self.memory.0[(self.sp) as usize];
+                self.$snd = self.memory.0[(self.sp + 1) as usize];
                 self.sp += 2;
+            };
+        }
+
+        macro_rules! XOR {
+            ($reg:ident) => {
+                self.$reg = self.$reg ^ self.$reg;
+                self._LogicFlagsA();
+            };
+        }
+
+        macro_rules! AND {
+            ($reg:ident) => {
+                self.$reg = self.$reg & self.$reg;
+                self._LogicFlagsA();
             };
         }
 
@@ -237,8 +295,10 @@ impl State8080 {
             }
             // 0x06	MVI B,D8
             0x06 => {
-                DIS!("MVI B,D8");
-                MOVRM!(b);
+                let offset = self.pc + 1;
+                let arg = self.memory.0[offset as usize];
+                DIS!("MVI B,$#{:0>4x}", arg);
+                MOVRI!(b);
             }
             0x07..=0x08 => self._unimplemented_instruction(),
             0x09 => {
@@ -309,7 +369,10 @@ impl State8080 {
             }
             0x32 => {
                 DIS!("STA adr");
-                State8080::_todo()
+                let offset = ((self.memory.0[(self.pc + 2) as usize] as u32) << 8)
+                    | (self.memory.0[(self.pc + 1) as usize] as u32);
+                self.memory.0[offset as usize] = self.a;
+                self.pc += 2;
             }
             0x36 => {
                 DIS!("MVI M,D8");
@@ -319,11 +382,14 @@ impl State8080 {
             }
             0x3a => {
                 DIS!("LDA adr");
-                State8080::_todo()
+                let offset = ((self.memory.0[(self.pc + 2) as usize] as u32) << 8)
+                    | (self.memory.0[(self.pc + 1) as usize] as u32);
+                self.a = self.memory.0[offset as usize];
+                self.pc += 2;
             }
             0x3e => {
                 DIS!("MVI A,D8");
-                State8080::_todo()
+                MOVRI!(a);
             }
 
             0x56 => {
@@ -336,7 +402,7 @@ impl State8080 {
             }
             0x66 => {
                 DIS!("MOV H,M");
-                MOVRM!(d);
+                MOVRM!(h);
             }
 
             0x6f => {
@@ -368,12 +434,12 @@ impl State8080 {
             }
 
             0xa7 => {
-                DIS!("ANA A");
-                State8080::_todo()
+                DIS!("AND A");
+                AND!(a);
             }
             0xaf => {
-                DIS!("XRA A");
-                State8080::_todo()
+                DIS!("XOR A");
+                XOR!(a);
             }
             0xc1 => {
                 DIS!("POP B");
@@ -405,7 +471,13 @@ impl State8080 {
             }
             0xc6 => {
                 DIS!("ADI D8");
-                State8080::_todo()
+                let x = self.a as u16 + self.memory.0[(self.pc + 1) as usize] as u16;
+                self.cc.z = (x & 0xff) == 0;
+                self.cc.s = 0x80 == (x & 0x80);
+                self.cc.p = _parity((x & 0xff) as u32, std::mem::size_of::<u8>());
+                self.cc.cy = x > 0xff;
+                self.a = x as u8;
+                self.pc += 1;
             }
             0xc9 => {
                 DIS!("RET");
@@ -427,7 +499,7 @@ impl State8080 {
             }
             0xd1 => {
                 DIS!("POP D");
-                State8080::_todo()
+                POP!(e, d);
             }
             0xd3 => {
                 DIS!("OUT D8");
@@ -447,7 +519,9 @@ impl State8080 {
             }
             0xe6 => {
                 DIS!("ANI D8");
-                State8080::_todo()
+                self.a &= self.memory.0[(self.pc + 1) as usize];
+                self._LogicFlagsA();
+                self.pc += 1;
             }
             0xeb => {
                 DIS!("XCHG");
@@ -460,16 +534,23 @@ impl State8080 {
             }
             0xf1 => {
                 DIS!("POP PSW");
-                State8080::_todo()
+                let flags = self.memory.0[self.sp as usize];
+                self.a = self.memory.0[(self.sp + 1) as usize];
+                self.cc.deserialize(flags);
+                self.sp += 2
             }
 
             0xf5 => {
                 DIS!("PUSH PSW");
-                State8080::_todo()
+
+                self.memory.0[(self.sp - 1) as usize] = self.a;
+                let flags = self.cc.serialize();
+                self.memory.0[(self.sp - 2) as usize] = flags;
+                self.sp -= 2;
             }
             0xfb => {
                 DIS!("EI");
-                State8080::_todo()
+                self.int_enable = true;
             }
             0xfe => {
                 DIS!("CPI D8");
@@ -489,6 +570,13 @@ impl State8080 {
         self.pc += 1;
     }
 
+    fn _LogicFlagsA(&mut self) {
+        self.cc.cy = false;
+        self.cc.ac = 0;
+        self.cc.z = self.a == 0;
+        self.cc.s = 0x80 == (self.a & 0x80);
+        self.cc.p = _parity(self.a as u32, std::mem::size_of::<u8>())
+    }
     fn _unimplemented_instruction(&self) {
         let opcode: u8 = self.memory.0[self.pc as usize];
         println!("Unimplemented Instruction with opcode 0x{:0>2x}", opcode);
@@ -501,19 +589,55 @@ impl State8080 {
     }
 }
 fn main() {
+    use drawille::Canvas;
+    use std::env;
+    let mut canvas = Canvas::new(224, 256);
+
+    let args: Vec<String> = env::args().collect();
+    let num_instr = args[1].parse().unwrap_or(50000);
     let state: &mut State8080 = &mut Default::default();
+
     let f = fs::read("./rom/invaders").expect("Unable to read ROM file");
-    // f.read(&mut state.memory.0).unwrap();
-    state.memory.0[0] = 0xff;
     // read rom into RAM memory
     for (i, c) in f.iter().enumerate() {
         state.memory.0[i] = *c as u8;
     }
-    print!("{}[2J", 27 as char);
-    for i in 0..200 {
-        print!("{}\t", i);
+
+    // print!("{}[2J", 27 as char);
+    let mut v = Vec::new();
+    for i in 0..=num_instr {
+        // print!("{}\t", i);
         state.emulate();
+        let framebuffer = &state.memory.0[0x2400..=0x3FFF];
+        if i < 40000 {
+            continue;
+        }
+        use std::time::{Duration, Instant};
+        let now = Instant::now();
+        canvas.clear();
+        for (i, p) in framebuffer.iter().enumerate() {
+            for ii in (0..8).rev() {
+                let ind = i * 8 + 8 - ii;
+                if *p & 1 << ii != 0 {
+                    canvas.set((ind / 256) as u32, (ind % 256) as u32);
+                }
+            }
+        }
+        print!("{}[2J", 27 as char);
+        let stdout1 = std::io::stdout();
+        let mut stdout = stdout1.lock();
+        use std::io::Write;
+        // std::io::copy(reader: &mut R, writer: &mut W)
+        stdout.write_all(canvas.frame().as_bytes());
+        v.push(now.elapsed().as_millis());
+        if i > 50000 {
+            break;
+        }
+        // write!(stdout, canvas.frame());
     }
+
+    print!("{}[2J", 27 as char);
+    print!("{:?}", v);
 }
 
 #[cfg(test)]
