@@ -372,20 +372,55 @@ impl State8080 {
                     | (self.memory.0[(self.pc + 1) as usize] as u32)
             };
         }
+        macro_rules! expr_identity {
+            ($e:expr) => {
+                $e
+            };
+        }
 
-        macro_rules! XOR {
-            ($reg:ident) => {
-                self.$reg = self.$reg ^ self.$reg;
+        // Logical Operator A
+        // A <- A ($op) $reg
+        macro_rules! LOPA {
+            ($op:tt, $reg:ident) => {
+                self.a = expr_identity!(self.a $op self.$reg);
+                self._LogicFlagsA();
+            };
+            ($op:tt) => {
+                let m = DEREF_HL!();
+                self.a = self.a $op m;
                 self._LogicFlagsA();
             };
         }
 
-        macro_rules! AND {
-            ($reg:ident) => {
-                self.$reg = self.$reg & self.$reg;
-                self._LogicFlagsA();
+        // Arithmetic Operator A
+        // A <- A ($op) $reg
+        macro_rules! AOPA {
+            (-, $reg:ident, $cy:expr) => {
+                let res = SUB!(SUB!(self.a, self.$reg),if $cy {1} else {0});
+                // need the identity because of some Rust issue?
+                self.a = expr_identity!(res as u8);
+                self._arithFlagsA(res);
+            };
+            ($op:tt, $reg:ident, $cy:expr) => {
+                let res = self.a as u16 $op self.$reg as u16 $op if $cy {1} else {0};
+                // need the identity because of some Rust issue?
+                self.a = expr_identity!(res as u8);
+                self._arithFlagsA(res);
+            };
+            (-, $blah:literal, $cy:expr) => {
+                let m = DEREF_HL!();
+                let res = SUB!(SUB!(self.a, m),if $cy {1} else {0});
+                self.a = res as u8;
+                self._arithFlagsA(res);
+            };
+            ($op:tt, $blah:literal, $cy:expr) => {
+                let m = DEREF_HL!();
+                let res = self.a as u16 $op m as u16 $op if $cy {1} else {0};
+                self.a = res as u8;
+                self._arithFlagsA(res);
             };
         }
+
         macro_rules! SUB {
             ($a:expr, $b:expr) => {
                 if $a as u16 >= $b as u16 {
@@ -400,7 +435,12 @@ impl State8080 {
             ($reg:ident) => {
                 // log. or makes sure the result is never negative
                 // let res = (self.a as u16 | 0x0001) - self.$reg as u16;
-                let res = self.a as u16 - self.$reg as u16; // todo:: this may panic
+                let res = SUB!(self.a, self.$reg);
+                self._arithFlagsA(res);
+            };
+            () => {
+                let mem_hl = DEREF_HL!();
+                let res = SUB!(self.a, mem_hl);
                 self._arithFlagsA(res);
             };
         }
@@ -508,13 +548,12 @@ impl State8080 {
             }
             0x0c => {
                 DIS!("INR C");
-                DCR!(c);
+                INR!(c);
             }
             0x0d => {
                 DIS!("DCR C");
                 DCR!(c);
             }
-
             0x0e => {
                 DIS!("MVI B,D8");
                 MOVRI!(c);
@@ -565,7 +604,10 @@ impl State8080 {
                 DIS!("DCR E");
                 DCR!(e);
             }
-
+            0x1e => {
+                DIS!("MVI E,D8");
+                MOVRI!(e);
+            }
             0x21 => {
                 DIS!("LXI H,D16");
                 self.l = self.memory.0[(self.pc + 1) as usize];
@@ -586,9 +628,7 @@ impl State8080 {
             }
             0x26 => {
                 DIS!("MVI H,D8");
-                let arg1 = self.memory.0[(self.pc + 1) as usize];
-                self.h = arg1;
-                self.pc += 1;
+                MOVRI!(h);
             }
             0x29 => {
                 DIS!("DAD H");
@@ -601,6 +641,10 @@ impl State8080 {
             0x2d => {
                 DIS!("DCR L");
                 DCR!(l);
+            }
+            0x2e => {
+                DIS!("MVI L,D8");
+                MOVRI!(l);
             }
             0x31 => {
                 DIS!("LXI SP,D16");
@@ -636,208 +680,616 @@ impl State8080 {
                 DIS!("DCR A");
                 DCR!(a);
             }
-
-
-            // 0x40 	MOV B,B	1		B <- B
-            0x40 => {DIS!("MOV B,B"); MOVRR!(b,b);}
-            // 0x41 	MOV B,C	1		B <- C
-            0x41 => {DIS!("MOV B,C"); MOVRR!(b,c);}
-            // 0x42 	MOV B,D	1		B <- D
-            0x42 => {DIS!("MOV B,D"); MOVRR!(b,d);}
-            // 0x43 	MOV B,E	1		B <- E
-            0x43 => {DIS!("MOV B,E"); MOVRR!(b,e);}
-            // 0x44 	MOV B,H	1		B <- H
-            0x44 => {DIS!("MOV B,H"); MOVRR!(b,h);}
-            // 0x45 	MOV B,L	1		B <- L
-            0x45 => {DIS!("MOV B,L"); MOVRR!(b,l);}
-            // 0x46 	MOV B,M	1		B <- (HL)
-            0x46 => {DIS!("MOV B,M"); MOVRM!(b);}
-            // 0x47 	MOV B,A	1		B <- A
-            0x47=> {DIS!("MOV B,A"); MOVRR!(b,a);}
-            // 0x48 	MOV C,B	1		C <- B
-            0x48 => {DIS!("MOV C,B"); MOVRR!(c,b);}
-            // 0x49 	MOV C,C	1		C <- C
-            0x49 => {DIS!("MOV C,C"); MOVRR!(c,c);}
-            // 0x4a 	MOV C,D	1		C <- D
-            0x4a => {DIS!("MOV C,D"); MOVRR!(c,d);}
-            // 0x4b 	MOV C,E	1		C <- E
-            0x4b => {DIS!("MOV C,E"); MOVRR!(c,e);}
-            // 0x4c 	MOV C,H	1		C <- H
-            0x4c => {DIS!("MOV C,H"); MOVRR!(c,h);}
-            // 0x4d 	MOV C,L	1		C <- L
-            0x4d => {DIS!("MOV C,L"); MOVRR!(c,l);}
-            // 0x4e 	MOV C,M	1		C <- (HL)
-            0x4e => {DIS!("MOV C,M"); MOVRM!(c);}
-            // 0x4f 	MOV C,A	1		C <- A
-            0x4f => {DIS!("MOV C,A"); MOVRR!(c,a);}
-            // 0x50 	MOV D,B	1		D <- B
-            0x50 => {DIS!("MOV D,B"); MOVRR!(d,b);}
-            // 0x51 	MOV D,C	1		D <- C
-            0x51 => {DIS!("MOV D,C"); MOVRR!(d,c);}
-            // 0x52 	MOV D,D	1		D <- D
-            0x52 => {DIS!("MOV D,D"); MOVRR!(d,d);}
-            // 0x53 	MOV D,E	1		D <- E
-            0x53 => {DIS!("MOV D,E"); MOVRR!(d,e);}
-            // 0x54 	MOV D,H	1		D <- H
-            0x54 => {DIS!("MOV D,H"); MOVRR!(d,h);}
-            // 0x55 	MOV D,L	1		D <- L
-            0x55 => {DIS!("MOV D,L"); MOVRR!(d,l);}
-            // 0x56 	MOV D,M	1		D <- (HL)
-            0x56 => {DIS!("MOV D,M"); MOVRM!(d);}
-            // 0x57 	MOV D,A	1		D <- A
-            0x57 => {DIS!("MOV D,A"); MOVRR!(d,a);}
-            // 0x58 	MOV E,B	1		E <- B
-            0x58 => {DIS!("MOV E,B"); MOVRR!(e,b);}
-            // 0x59 	MOV E,C	1		E <- C
-            0x59 => {DIS!("MOV E,C"); MOVRR!(e,c);}
-            // 0x5a 	MOV E,D	1		E <- D
-            0x5a => {DIS!("MOV E,D"); MOVRR!(e,d);}
-            // 0x5b 	MOV E,E	1		E <- E
-            0x5b => {DIS!("MOV E,E"); MOVRR!(e,e);}
-            // 0x5c 	MOV E,H	1		E <- H
-            0x5c => {DIS!("MOV E,H"); MOVRR!(e,h);}
-            // 0x5d 	MOV E,L	1		E <- L
-            0x5d => {DIS!("MOV E,L"); MOVRR!(e,l);}
-            // 0x5e 	MOV E,M	1		E <- (HL)
-            0x5e => {DIS!("MOV E,M"); MOVRM!(e);}
-            // 0x5f 	MOV E,A	1		E <- A
-            0x5f => {DIS!("MOV E,A"); MOVRR!(e,a);}
-            // 0x60 	MOV H,B	1		H <- B
-            0x60 => {DIS!("MOV H,B"); MOVRR!(h,b);}
-            // 0x61 	MOV H,C	1		H <- C
-            0x61 => {DIS!("MOV H,C"); MOVRR!(h,c);}
-            // 0x62 	MOV H,D	1		H <- D
-            0x62 => {DIS!("MOV H,D"); MOVRR!(h,d);}
-            // 0x63 	MOV H,E	1		H <- E
-            0x63 => {DIS!("MOV H,E"); MOVRR!(h,e);}
-            // 0x64 	MOV H,H	1		H <- H
-            0x64 => {DIS!("MOV H,H"); MOVRR!(h,h);}
-            // 0x65 	MOV H,L	1		H <- L
-            0x65 => {DIS!("MOV H,L"); MOVRR!(h,l);}
-            // 0x66 	MOV H,M	1		H <- (HL)
-            0x66 => {DIS!("MOV H,M"); MOVRM!(h);}
-            // 0x67 	MOV H,A	1		H <- A
-            0x67 => {DIS!("MOV H,A"); MOVRR!(h,a);}
-            // 0x68 	MOV L,B	1		L <- B
-            0x68 => {DIS!("MOV L,B"); MOVRR!(l,b);}
-            // 0x69 	MOV L,C	1		L <- C
-            0x69 => {DIS!("MOV L,C"); MOVRR!(l,c);}
-            // 0x6a 	MOV L,D	1		L <- D
-            0x6a => {DIS!("MOV L,D"); MOVRR!(l,d);}
-            // 0x6b 	MOV L,E	1		L <- E
-            0x6b => {DIS!("MOV L,E"); MOVRR!(l,e);}
-            // 0x6c 	MOV L,H	1		L <- H
-            0x6c => {DIS!("MOV L,H"); MOVRR!(l,h);}
-            // 0x6d 	MOV L,L	1		L <- L
-            0x6d => {DIS!("MOV L,L"); MOVRR!(l,l);}
-            // 0x6e 	MOV L,M	1		L <- (HL)
-            0x6e => {DIS!("MOV L,M"); MOVRM!(l);}
-            // 0x6f 	MOV L,A	1		L <- A
-            0x6f => {DIS!("MOV L,A"); MOVRR!(l,a);}
-            // 0x70 	MOV M,B	1		(HL) <- B
-            0x70 => {DIS!("MOV M,B"); MOVMR!(b);}
-            // 0x71 	MOV M,C	1		(HL) <- C
-            0x71 => {DIS!("MOV M,C"); MOVMR!(c);}
-            // 0x72 	MOV M,D	1		(HL) <- D
-            0x72 => {DIS!("MOV M,D"); MOVMR!(d);}
-            // 0x73 	MOV M,E	1		(HL) <- E
-            0x73 => {DIS!("MOV M,E"); MOVMR!(e);}
-            // 0x74 	MOV M,H	1		(HL) <- H
-            0x74 => {DIS!("MOV M,H"); MOVMR!(h);}
-            // 0x75 	MOV M,L	1		(HL) <- L
-            0x75 => {DIS!("MOV M,L"); MOVMR!(l);}
-            // 0x76 	HLT	1		special
-            // 0x77 	MOV M,A	1		(HL) <- A
-            0x77 => {DIS!("MOV M,A"); MOVMR!(a);}
-            // 0x78 	MOV A,B	1		A <- B
-            0x78 => {DIS!("MOV A,B"); MOVRR!(a,b);}
-            // 0x79 	MOV A,C	1		A <- C
-            0x79 => {DIS!("MOV A,C"); MOVRR!(a,c);}
-            // 0x7a 	MOV A,D	1		A <- D
-            0x7a => {DIS!("MOV A,D"); MOVRR!(a,d);}
-            // 0x7b 	MOV A,E	1		A <- E
-            0x7b => {DIS!("MOV A,E"); MOVRR!(a,e);}
-            // 0x7c 	MOV A,H	1		A <- H
-            0x7c => {DIS!("MOV A,H"); MOVRR!(a,h);}
-            // 0x7d 	MOV A,L	1		A <- L
-            0x7d => {DIS!("MOV A,L"); MOVRR!(a,l);}
-            // 0x7e 	MOV A,M	1		A <- (HL)
-            0x7e => {DIS!("MOV A,M"); MOVRM!(a);}
-            // 0x7f 	MOV A,A	1		A <- A
-            0x7f => {DIS!("MOV A,A"); MOVRR!(a,a);}
-
-
-
-
-
-
-
-
             0x3e => {
                 DIS!("MVI A,D8");
                 MOVRI!(a);
             }
 
-            // 0x56 => {
-            //     DIS!("MOV D,M");
-            //     MOVRM!(d);
-            // }
-            // 0x5e => {
-            //     DIS!("MOV E,M");
-            //     MOVRM!(e);
-            // }
-            // 0x66 => {
-            //     DIS!("MOV H,M");
-            //     MOVRM!(h);
-            // }
+            // 0x40 	MOV B,B	1		B <- B
+            0x40 => {
+                DIS!("MOV B,B");
+                MOVRR!(b, b);
+            }
+            // 0x41 	MOV B,C	1		B <- C
+            0x41 => {
+                DIS!("MOV B,C");
+                MOVRR!(b, c);
+            }
+            // 0x42 	MOV B,D	1		B <- D
+            0x42 => {
+                DIS!("MOV B,D");
+                MOVRR!(b, d);
+            }
+            // 0x43 	MOV B,E	1		B <- E
+            0x43 => {
+                DIS!("MOV B,E");
+                MOVRR!(b, e);
+            }
+            // 0x44 	MOV B,H	1		B <- H
+            0x44 => {
+                DIS!("MOV B,H");
+                MOVRR!(b, h);
+            }
+            // 0x45 	MOV B,L	1		B <- L
+            0x45 => {
+                DIS!("MOV B,L");
+                MOVRR!(b, l);
+            }
+            // 0x46 	MOV B,M	1		B <- (HL)
+            0x46 => {
+                DIS!("MOV B,M");
+                MOVRM!(b);
+            }
+            // 0x47 	MOV B,A	1		B <- A
+            0x47 => {
+                DIS!("MOV B,A");
+                MOVRR!(b, a);
+            }
+            // 0x48 	MOV C,B	1		C <- B
+            0x48 => {
+                DIS!("MOV C,B");
+                MOVRR!(c, b);
+            }
+            // 0x49 	MOV C,C	1		C <- C
+            0x49 => {
+                DIS!("MOV C,C");
+                MOVRR!(c, c);
+            }
+            // 0x4a 	MOV C,D	1		C <- D
+            0x4a => {
+                DIS!("MOV C,D");
+                MOVRR!(c, d);
+            }
+            // 0x4b 	MOV C,E	1		C <- E
+            0x4b => {
+                DIS!("MOV C,E");
+                MOVRR!(c, e);
+            }
+            // 0x4c 	MOV C,H	1		C <- H
+            0x4c => {
+                DIS!("MOV C,H");
+                MOVRR!(c, h);
+            }
+            // 0x4d 	MOV C,L	1		C <- L
+            0x4d => {
+                DIS!("MOV C,L");
+                MOVRR!(c, l);
+            }
+            // 0x4e 	MOV C,M	1		C <- (HL)
+            0x4e => {
+                DIS!("MOV C,M");
+                MOVRM!(c);
+            }
+            // 0x4f 	MOV C,A	1		C <- A
+            0x4f => {
+                DIS!("MOV C,A");
+                MOVRR!(c, a);
+            }
+            // 0x50 	MOV D,B	1		D <- B
+            0x50 => {
+                DIS!("MOV D,B");
+                MOVRR!(d, b);
+            }
+            // 0x51 	MOV D,C	1		D <- C
+            0x51 => {
+                DIS!("MOV D,C");
+                MOVRR!(d, c);
+            }
+            // 0x52 	MOV D,D	1		D <- D
+            0x52 => {
+                DIS!("MOV D,D");
+                MOVRR!(d, d);
+            }
+            // 0x53 	MOV D,E	1		D <- E
+            0x53 => {
+                DIS!("MOV D,E");
+                MOVRR!(d, e);
+            }
+            // 0x54 	MOV D,H	1		D <- H
+            0x54 => {
+                DIS!("MOV D,H");
+                MOVRR!(d, h);
+            }
+            // 0x55 	MOV D,L	1		D <- L
+            0x55 => {
+                DIS!("MOV D,L");
+                MOVRR!(d, l);
+            }
+            // 0x56 	MOV D,M	1		D <- (HL)
+            0x56 => {
+                DIS!("MOV D,M");
+                MOVRM!(d);
+            }
+            // 0x57 	MOV D,A	1		D <- A
+            0x57 => {
+                DIS!("MOV D,A");
+                MOVRR!(d, a);
+            }
+            // 0x58 	MOV E,B	1		E <- B
+            0x58 => {
+                DIS!("MOV E,B");
+                MOVRR!(e, b);
+            }
+            // 0x59 	MOV E,C	1		E <- C
+            0x59 => {
+                DIS!("MOV E,C");
+                MOVRR!(e, c);
+            }
+            // 0x5a 	MOV E,D	1		E <- D
+            0x5a => {
+                DIS!("MOV E,D");
+                MOVRR!(e, d);
+            }
+            // 0x5b 	MOV E,E	1		E <- E
+            0x5b => {
+                DIS!("MOV E,E");
+                MOVRR!(e, e);
+            }
+            // 0x5c 	MOV E,H	1		E <- H
+            0x5c => {
+                DIS!("MOV E,H");
+                MOVRR!(e, h);
+            }
+            // 0x5d 	MOV E,L	1		E <- L
+            0x5d => {
+                DIS!("MOV E,L");
+                MOVRR!(e, l);
+            }
+            // 0x5e 	MOV E,M	1		E <- (HL)
+            0x5e => {
+                DIS!("MOV E,M");
+                MOVRM!(e);
+            }
+            // 0x5f 	MOV E,A	1		E <- A
+            0x5f => {
+                DIS!("MOV E,A");
+                MOVRR!(e, a);
+            }
+            // 0x60 	MOV H,B	1		H <- B
+            0x60 => {
+                DIS!("MOV H,B");
+                MOVRR!(h, b);
+            }
+            // 0x61 	MOV H,C	1		H <- C
+            0x61 => {
+                DIS!("MOV H,C");
+                MOVRR!(h, c);
+            }
+            // 0x62 	MOV H,D	1		H <- D
+            0x62 => {
+                DIS!("MOV H,D");
+                MOVRR!(h, d);
+            }
+            // 0x63 	MOV H,E	1		H <- E
+            0x63 => {
+                DIS!("MOV H,E");
+                MOVRR!(h, e);
+            }
+            // 0x64 	MOV H,H	1		H <- H
+            0x64 => {
+                DIS!("MOV H,H");
+                MOVRR!(h, h);
+            }
+            // 0x65 	MOV H,L	1		H <- L
+            0x65 => {
+                DIS!("MOV H,L");
+                MOVRR!(h, l);
+            }
+            // 0x66 	MOV H,M	1		H <- (HL)
+            0x66 => {
+                DIS!("MOV H,M");
+                MOVRM!(h);
+            }
+            // 0x67 	MOV H,A	1		H <- A
+            0x67 => {
+                DIS!("MOV H,A");
+                MOVRR!(h, a);
+            }
+            // 0x68 	MOV L,B	1		L <- B
+            0x68 => {
+                DIS!("MOV L,B");
+                MOVRR!(l, b);
+            }
+            // 0x69 	MOV L,C	1		L <- C
+            0x69 => {
+                DIS!("MOV L,C");
+                MOVRR!(l, c);
+            }
+            // 0x6a 	MOV L,D	1		L <- D
+            0x6a => {
+                DIS!("MOV L,D");
+                MOVRR!(l, d);
+            }
+            // 0x6b 	MOV L,E	1		L <- E
+            0x6b => {
+                DIS!("MOV L,E");
+                MOVRR!(l, e);
+            }
+            // 0x6c 	MOV L,H	1		L <- H
+            0x6c => {
+                DIS!("MOV L,H");
+                MOVRR!(l, h);
+            }
+            // 0x6d 	MOV L,L	1		L <- L
+            0x6d => {
+                DIS!("MOV L,L");
+                MOVRR!(l, l);
+            }
+            // 0x6e 	MOV L,M	1		L <- (HL)
+            0x6e => {
+                DIS!("MOV L,M");
+                MOVRM!(l);
+            }
+            // 0x6f 	MOV L,A	1		L <- A
+            0x6f => {
+                DIS!("MOV L,A");
+                MOVRR!(l, a);
+            }
+            // 0x70 	MOV M,B	1		(HL) <- B
+            0x70 => {
+                DIS!("MOV M,B");
+                MOVMR!(b);
+            }
+            // 0x71 	MOV M,C	1		(HL) <- C
+            0x71 => {
+                DIS!("MOV M,C");
+                MOVMR!(c);
+            }
+            // 0x72 	MOV M,D	1		(HL) <- D
+            0x72 => {
+                DIS!("MOV M,D");
+                MOVMR!(d);
+            }
+            // 0x73 	MOV M,E	1		(HL) <- E
+            0x73 => {
+                DIS!("MOV M,E");
+                MOVMR!(e);
+            }
+            // 0x74 	MOV M,H	1		(HL) <- H
+            0x74 => {
+                DIS!("MOV M,H");
+                MOVMR!(h);
+            }
+            // 0x75 	MOV M,L	1		(HL) <- L
+            0x75 => {
+                DIS!("MOV M,L");
+                MOVMR!(l);
+            }
+            // 0x76 	HLT	1		special
+            // 0x77 	MOV M,A	1		(HL) <- A
+            0x77 => {
+                DIS!("MOV M,A");
+                MOVMR!(a);
+            }
+            // 0x78 	MOV A,B	1		A <- B
+            0x78 => {
+                DIS!("MOV A,B");
+                MOVRR!(a, b);
+            }
+            // 0x79 	MOV A,C	1		A <- C
+            0x79 => {
+                DIS!("MOV A,C");
+                MOVRR!(a, c);
+            }
+            // 0x7a 	MOV A,D	1		A <- D
+            0x7a => {
+                DIS!("MOV A,D");
+                MOVRR!(a, d);
+            }
+            // 0x7b 	MOV A,E	1		A <- E
+            0x7b => {
+                DIS!("MOV A,E");
+                MOVRR!(a, e);
+            }
+            // 0x7c 	MOV A,H	1		A <- H
+            0x7c => {
+                DIS!("MOV A,H");
+                MOVRR!(a, h);
+            }
+            // 0x7d 	MOV A,L	1		A <- L
+            0x7d => {
+                DIS!("MOV A,L");
+                MOVRR!(a, l);
+            }
+            // 0x7e 	MOV A,M	1		A <- (HL)
+            0x7e => {
+                DIS!("MOV A,M");
+                MOVRM!(a);
+            }
+            // 0x7f 	MOV A,A	1		A <- A
+            0x7f => {
+                DIS!("MOV A,A");
+                MOVRR!(a, a);
+            }
 
-            // 0x6f => {
-            //     DIS!("MOV L,A");
-            //     MOVRR!(l, a);
-            // }
+            // arithmetic
+            //0x80 	ADD B	1	Z, S, P, CY, AC	A <- A + B
+            0x80 => {
+                DIS!("ADD C");
+                AOPA!(+,b,false);
+            }
+            // 0x81 	ADD C	1	Z, S, P, CY, AC	A <- A + C
+            0x81 => {
+                DIS!("ADD C");
+                AOPA!(+,c,false);
+            }
+            // 0x82 	ADD D	1	Z, S, P, CY, AC	A <- A + D
+            0x82 => {
+                DIS!("ADD D");
+                AOPA!(+,d,false);
+            }
+            // 0x83 	ADD E	1	Z, S, P, CY, AC	A <- A + E
+            0x83 => {
+                DIS!("ADD E");
+                AOPA!(+,e,false);
+            }
+            // 0x84 	ADD H	1	Z, S, P, CY, AC	A <- A + H
+            0x84 => {
+                DIS!("ADD H");
+                AOPA!(+,h,false);
+            }
+            // 0x85 	ADD L	1	Z, S, P, CY, AC	A <- A + L
+            0x85 => {
+                DIS!("ADD L");
+                AOPA!(+,l,false);
+            }
+            // 0x86 	ADD M	1	Z, S, P, CY, AC	A <- A + (HL)
+            0x86 => {
+                DIS!("ADD M");
+                AOPA!(+,"to avoid macro misinterpret",false);
+            }
+            // 0x87 	ADD A	1	Z, S, P, CY, AC	A <- A + A
+            0x87 => {
+                DIS!("ADD A");
+                AOPA!(+,a,false);
+            }
 
-            // 0x77 => {
-            //     DIS!("MOV M,A");
-            //     MOVMR!(a);
-            // }
+            // 0x88 	ADC B	1	Z, S, P, CY, AC	A <- A + B + CY
+            0x88 => {
+                DIS!("ADC B");
+                AOPA!(+,b,self.cc.cy);
+            }
+            // 0x89 	ADC C	1	Z, S, P, CY, AC	A <- A + C + CY
+            0x89 => {
+                DIS!("ADC C");
+                AOPA!(+,c,self.cc.cy);
+            }
+            // 0x8a 	ADC D	1	Z, S, P, CY, AC	A <- A + D + CY
+            0x8a => {
+                DIS!("ADC D");
+                AOPA!(+,d,self.cc.cy);
+            }
+            // 0x8b 	ADC E	1	Z, S, P, CY, AC	A <- A + E + CY
+            0x8b => {
+                DIS!("ADC E");
+                AOPA!(+,e,self.cc.cy);
+            }
+            // 0x8c 	ADC H	1	Z, S, P, CY, AC	A <- A + H + CY
+            0x8c => {
+                DIS!("ADC H");
+                AOPA!(+,h,self.cc.cy);
+            }
+            // 0x8d 	ADC L	1	Z, S, P, CY, AC	A <- A + L + CY
+            0x8d => {
+                DIS!("ADC L");
+                AOPA!(+,l,self.cc.cy);
+            }
+            // 0x8e 	ADC M	1	Z, S, P, CY, AC	A <- A + (HL) + CY
+            0x8e => {
+                DIS!("ADC M");
+                AOPA!(+,"to avoid macro misinterpretation",self.cc.cy);
+            }
+            // 0x8f 	ADC A	1	Z, S, P, CY, AC	A <- A + A + CY
+            0x8f => {
+                DIS!("ADC A");
+                AOPA!(+,a,self.cc.cy);
+            }
 
-            // 0x7a => {
-            //     DIS!("MOV A,D");
-            //     MOVRR!(a, d);
-            // }
-            // 0x7b => {
-            //     DIS!("MOV A,E");
-            //     MOVRR!(a, e);
-            // }
-            // 0x7c => {
-            //     DIS!("MOV A,H");
-            //     MOVRR!(a, h);
-            // }
-            // 0x7d => {
-            //     DIS!("MOV A,L");
-            //     MOVRR!(a, l);
-            // }
+            // 0x90 	SUB B	1	Z, S, P, CY, AC	A <- A - B
+            0x90 => {
+                DIS!("SUB B");
+                AOPA!(-,b,false);
+            }
+            // 0x91 	SUB C	1	Z, S, P, CY, AC	A <- A - C
+            0x91 => {
+                DIS!("SUB C");
+                AOPA!(-,c,false);
+            }
+            // 0x92 	SUB D	1	Z, S, P, CY, AC	A <- A + D
+            0x92 => {
+                DIS!("SUB D");
+                AOPA!(-,d,false);
+            }
+            // 0x93 	SUB E	1	Z, S, P, CY, AC	A <- A - E
+            0x93 => {
+                DIS!("SUB E");
+                AOPA!(-,e,false);
+            }
+            // 0x94 	SUB H	1	Z, S, P, CY, AC	A <- A + H
+            0x94 => {
+                DIS!("SUB H");
+                AOPA!(-,h,false);
+            }
+            // 0x95 	SUB L	1	Z, S, P, CY, AC	A <- A - L
+            0x95 => {
+                DIS!("SUB L");
+                AOPA!(-,l,false);
+            }
+            // 0x96 	SUB M	1	Z, S, P, CY, AC	A <- A + (HL)
+            0x96 => {
+                DIS!("SUB M");
+                AOPA!(-, "to avoid macro misinterpretation",false);
+            }
+            // 0x97 	SUB A	1	Z, S, P, CY, AC	A <- A - A
+            0x97 => {
+                DIS!("SUB A");
+                AOPA!(-,a,false);
+            }
 
-            // 0x7e => {
-            //     DIS!("MOV A,M");
-            //     MOVRM!(a);
-            // }
+            // 0x98 	SBB B	1	Z, S, P, CY, AC	A <- A - B - CY
+            0x98 => {
+                DIS!("SBB B");
+                AOPA!(-,b,self.cc.cy);
+            }
+            // 0x99 	SBB C	1	Z, S, P, CY, AC	A <- A - C - CY
+            0x99 => {
+                DIS!("SBB C");
+                AOPA!(-,c,self.cc.cy);
+            }
+            // 0x9a 	SBB D	1	Z, S, P, CY, AC	A <- A - D - CY
+            0x9a => {
+                DIS!("SBB D");
+                AOPA!(-,d,self.cc.cy);
+            }
+            // 0x9b 	SBB E	1	Z, S, P, CY, AC	A <- A - E - CY
+            0x9b => {
+                DIS!("SBB E");
+                AOPA!(-,e,self.cc.cy);
+            }
+            // 0x9c 	SBB H	1	Z, S, P, CY, AC	A <- A - H - CY
+            0x9c => {
+                DIS!("SBB H");
+                AOPA!(-,h,self.cc.cy);
+            }
+            // 0x9d 	SBB L	1	Z, S, P, CY, AC	A <- A - L - CY
+            0x9d => {
+                DIS!("SBB L");
+                AOPA!(-,l,self.cc.cy);
+            }
+            // 0x9e 	SBB M	1	Z, S, P, CY, AC	A <- A - (HL) - CY
+            0x9e => {
+                DIS!("SBB M");
+                AOPA!(-,"to avoid macro misinterpretation",self.cc.cy);
+            }
+            // 0x9f 	SBB A	1	Z, S, P, CY, AC	A <- A - A - CY
+            0x9f => {
+                DIS!("SBB A");
+                AOPA!(-,a,self.cc.cy);
+            }
 
-
-
-
-
-
-
-
+            // 0xa0 	ANA B	1	Z, S, P, CY, AC	A <- A & B
+            0xa0 => {
+                DIS!("AND B");
+                LOPA!(&,b);
+            }
+            // 0xa1 	ANA C	1	Z, S, P, CY, AC	A <- A & C
+            0xa1 => {
+                DIS!("AND C");
+                LOPA!(&,c);
+            }
+            // 0xa2 	ANA D	1	Z, S, P, CY, AC	A <- A & D
+            0xa2 => {
+                DIS!("AND D");
+                LOPA!(&,d);
+            }
+            // 0xa3 	ANA E	1	Z, S, P, CY, AC	A <- A & E
+            0xa3 => {
+                DIS!("AND E");
+                LOPA!(&,e);
+            }
+            // 0xa4 	ANA H	1	Z, S, P, CY, AC	A <- A & H
+            0xa4 => {
+                DIS!("AND H");
+                LOPA!(&,h);
+            }
+            // 0xa5 	ANA L	1	Z, S, P, CY, AC	A <- A & L
+            0xa5 => {
+                DIS!("AND L");
+                LOPA!(&,l);
+            }
+            // 0xa6 	ANA M	1	Z, S, P, CY, AC	A <- A & (HL)
+            0xa6 => {
+                DIS!("AND M");
+                LOPA!(&);
+            }
+            // 0xa7 	ANA A	1	Z, S, P, CY, AC	A <- A & A
             0xa7 => {
                 DIS!("AND A");
-                AND!(a);
+                LOPA!(&,a);
             }
+
+            // 0xa8 	XRA B	1	Z, S, P, CY, AC	A <- A ^ B
+            0xa8 => {
+                DIS!("XOR B");
+                LOPA!(^,b);
+            }
+            // 0xa9 	XRA C	1	Z, S, P, CY, AC	A <- A ^ C
+            0xa9 => {
+                DIS!("XOR C");
+                LOPA!(^,c);
+            }
+            // 0xaa 	XRA D	1	Z, S, P, CY, AC	A <- A ^ D
+            0xaa => {
+                DIS!("XOR D");
+                LOPA!(^,d);
+            }
+            // 0xab 	XRA E	1	Z, S, P, CY, AC	A <- A ^ E
+            0xab => {
+                DIS!("XOR E");
+                LOPA!(^,e);
+            }
+            // 0xac 	XRA H	1	Z, S, P, CY, AC	A <- A ^ H
+            0xac => {
+                DIS!("XOR H");
+                LOPA!(^,h);
+            }
+            // 0xad 	XRA L	1	Z, S, P, CY, AC	A <- A ^ L
+            0xad => {
+                DIS!("XOR L");
+                LOPA!(^,l);
+            }
+            // 0xae 	XRA M	1	Z, S, P, CY, AC	A <- A ^ (HL)
+            0xae => {
+                DIS!("XOR M");
+                LOPA!(^);
+            }
+            // 0xaf 	XRA A	1	Z, S, P, CY, AC	A <- A ^ A
             0xaf => {
                 DIS!("XOR A");
-                XOR!(a);
+                LOPA!(^,a);
             }
+
+            // 0xb0 	ORA B	1	Z, S, P, CY, AC	A <- A | B
+            0xb0 => {
+                DIS!("ORA B");
+                LOPA!(|,b);
+            }
+            // 0xb1 	ORA C	1	Z, S, P, CY, AC	A <- A | C
+            0xb1 => {
+                DIS!("ORA C");
+                LOPA!(|,c);
+            }
+            // 0xb2 	ORA D	1	Z, S, P, CY, AC	A <- A | D
+            0xb2 => {
+                DIS!("ORA D");
+                LOPA!(|,d);
+            }
+            // 0xb3 	ORA E	1	Z, S, P, CY, AC	A <- A | E
+            0xb3 => {
+                DIS!("ORA E");
+                LOPA!(|,e);
+            }
+            // 0xb4 	ORA H	1	Z, S, P, CY, AC	A <- A | H
+            0xb4 => {
+                DIS!("ORA H");
+                LOPA!(|,h);
+            }
+            // 0xb5 	ORA L	1	Z, S, P, CY, AC	A <- A | L
+            0xb5 => {
+                DIS!("ORA L");
+                LOPA!(|,l);
+            }
+            // 0xb6 	ORA M	1	Z, S, P, CY, AC	A <- A | (HL)
+            0xb6 => {
+                DIS!("ORA M");
+                LOPA!(|);
+            }
+            // 0xb7 	ORA A	1	Z, S, P, CY, AC	A <- A | A
+            0xb7 => {
+                DIS!("ORA A");
+                LOPA!(|,a);
+            }
+
             // 0xb8 	CMP B	1	Z, S, P, CY, AC	A - B
             // 0xb9 	CMP C	1	Z, S, P, CY, AC	A - C
             // 0xba 	CMP D	1	Z, S, P, CY, AC	A - D
@@ -872,9 +1324,7 @@ impl State8080 {
             }
             0xbe => {
                 DIS!("CMP M");
-                let mem_hl = DEREF_HL!();
-                let res = self.a as u16 - mem_hl as u16; // todo: this may panic, see CMP!() as well
-                self._arithFlagsA(res);
+                CMP!();
             }
             0xbf => {
                 DIS!("CMP A");
