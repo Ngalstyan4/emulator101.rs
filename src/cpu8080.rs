@@ -61,6 +61,8 @@ impl CC {
         res |= if self.p != PARITY::default() { 1 } else { 0 };
         res <<= 1;
         res |= if self.s { 1 } else { 0 };
+        res <<= 1;
+        res |= if self.z { 1 } else { 0 };
         return res;
     }
     fn deserialize(&mut self, flags: u8) {
@@ -72,9 +74,9 @@ impl CC {
         self.z = 0x01 == (flags & 0x01);
         self.s = 0x02 == (flags & 0x02);
         self.p = if 0x04 == (flags & 0x04) {
-            PARITY::default()
-        } else {
             !PARITY::default()
+        } else {
+            PARITY::default()
         };
         self.cy = 0x05 == (flags & 0x08);
         self.ac = if 0x10 == (flags & 0x10) { 1 } else { 0 };
@@ -501,7 +503,9 @@ impl State8080 {
                             //saw this in the inspected code, never saw it called
                             println!("print char routine called\n");
                         }
-                        std::process::exit(1); // todo handle the below if this iscommented out
+                        self.pc += 2;
+                        return;
+                        // std::process::exit(1); // todo handle the below if this iscommented out
                     } else if adr == 0 {
                         std::process::exit(1);
                     }
@@ -570,6 +574,12 @@ impl State8080 {
                 DIS!("MVI B,D8");
                 MOVRI!(b);
             }
+            0x07 => {
+                DIS!("RLC");
+                self.cc.cy = self.a & 0x80 != 0;
+                self.a = ((self.a as u16) << 1) as u8;
+                self.a += if self.cc.cy { 1 } else { 0 };
+            }
             0x07..=0x08 => self._unimplemented_instruction(),
             0x09 => {
                 DIS!("DAD ,B");
@@ -630,6 +640,13 @@ impl State8080 {
                 DIS!("MVI D,D8");
                 MOVRI!(d);
             }
+            0x17 => {
+                DIS!("RAL");
+                let prev_cy = self.cc.cy;
+                self.cc.cy = self.a & 0x80 != 0;
+                self.a = ((self.a as u16) << 1) as u8;
+                self.a += if prev_cy { 1 } else { 0 };
+            }
             0x19 => {
                 DIS!("DAD D");
                 DAD!(d, e);
@@ -654,6 +671,11 @@ impl State8080 {
             0x1e => {
                 DIS!("MVI E,D8");
                 MOVRI!(e);
+            }
+            0x1f => {
+                DIS!("RAR");
+                self.cc.cy = self.a & 0x01 != 0;
+                self.a = (((self.a as u16) >> 1) | ((self.a) & 0x80) as u16) as u8;
             }
             0x21 => {
                 DIS!("LXI H,D16");
@@ -711,6 +733,13 @@ impl State8080 {
                 DIS!("MVI L,D8");
                 MOVRI!(l);
             }
+            0x2f => {
+                DIS!("CMA");
+                self.a = !self.a
+            }
+            0x30 => {
+                self._unimplemented_instruction();
+            }
             0x31 => {
                 DIS!("LXI SP,D16");
                 self.sp = ((self.memory.0[(self.pc + 2) as usize] as u16) << 8)
@@ -743,6 +772,19 @@ impl State8080 {
                 self.memory.0[offset as usize] = self.memory.0[(self.pc + 1) as usize];
                 self.pc += 1;
             }
+            0x37 => {
+                DIS!("STC");
+                self.cc.cy = true;
+            }
+            0x38 => self._unimplemented_instruction(),
+            0x39 => {
+                DIS!("DAD SP");
+                let hl = ((self.h as u32) << 8) | self.l as u32;
+                let new_hl = hl + self.sp as u32;
+                self.cc.cy = new_hl >> 16 != 0;
+                self.h = ((new_hl & 0xFF00) >> 8) as u8;
+                self.l = (new_hl & 0xFF) as u8;
+            }
             0x3a => {
                 DIS!("LDA adr");
                 let offset = ((self.memory.0[(self.pc + 2) as usize] as u32) << 8)
@@ -765,6 +807,10 @@ impl State8080 {
             0x3e => {
                 DIS!("MVI A,D8");
                 MOVRI!(a);
+            }
+            0x3f => {
+                DIS!("CMC");
+                self.cc.cy = !self.cc.cy;
             }
 
             // 0x40 	MOV B,B	1		B <- B
@@ -1551,7 +1597,7 @@ impl State8080 {
                 self.l = self.memory.0[self.sp as usize];
                 self.memory.0[self.sp as usize] = l;
                 self.h = self.memory.0[(self.sp + 1) as usize];
-                self.memory.0[self.sp as usize] = h;
+                self.memory.0[self.sp as usize + 1] = h;
             }
             0xe4 => {
                 DIS!("CPO {:0>4x}", OPS_12_MEM!());
@@ -1570,6 +1616,12 @@ impl State8080 {
             0xe8 => {
                 DIS!("RPE {:0>4x}", OPS_12_MEM!());
                 RET!(self.cc.p == PARITY::EVEN);
+            }
+            0xe9 => {
+                DIS!("PCHL");
+                let hl = ((self.h as u16) << 8) | self.l as u16;
+                self.pc = hl;
+                return;
             }
             0xea => {
                 DIS!("JPE {:0>4x}", OPS_12_MEM!());
@@ -1632,6 +1684,11 @@ impl State8080 {
             0xf8 => {
                 DIS!("RM {:0>4x}", OPS_12_MEM!());
                 RET!(self.cc.s);
+            }
+            0xf9 => {
+                DIS!("SPHL");
+                let hl = ((self.h as u16) << 8) | self.l as u16;
+                self.sp = hl;
             }
             0xfa => {
                 DIS!("JM {:0>4x}", OPS_12_MEM!());
@@ -1753,13 +1810,15 @@ mod tests {
     }
 
     #[test]
-    fn cpu_diag() {
+    fn cpu_diag() -> Result<(), String> {
         let state: &mut State8080 = &mut Default::default();
         let f = fs::read("./rom/cpudiag.bin").expect("Unable to read cpudiag ROM file");
         state.load_rom(f);
         state.init_cpudiag();
-        for _ in 0..1000 {
+        for i in 0..611 {
+            print!("{} ", i);
             state.emulate();
         }
+        Ok(())
     }
 }
