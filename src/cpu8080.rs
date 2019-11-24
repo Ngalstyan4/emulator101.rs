@@ -252,7 +252,12 @@ impl State8080 {
         /* INSTRUCTION MACROS BEGIN */
         macro_rules! DEREF_HL {
             () => {
-                self.memory.0[(((self.h as u32) << 8) | (self.l as u32)) as usize]
+                self.memory.0[((((self.h as u32) << 8) | (self.l as u32)) as usize)]
+            };
+        }
+        macro_rules! WRITE_HL {
+            ($e:expr) => {
+                self.memory.0[(((self.h as u32) << 8) | (self.l as u32)) as usize] = $e as u8;
             };
         }
         macro_rules! DIS {
@@ -260,19 +265,19 @@ impl State8080 {
                 ($fmt:expr, $($arg:tt)*) => (if State8080::DISASSEMBLE { print!($fmt, $($arg)*); println!("\t\t\t{:?}", self)});
         }
 
-        macro_rules! DCR {
-            ($reg:ident) => {
-                let res = if self.$reg == 0 {
-                    std::u8::MAX
-                } else {
-                    self.$reg - 1
-                };
-                self.cc.z = res == 0;
-                self.cc.s = 0x80 == (res & 0x80);
-                self.cc.p = _parity(res as u32, std::mem::size_of::<u8>());
-                self.$reg = res;
-            };
-        }
+        // macro_rules! DCR {
+        //     ($reg:ident) => {
+        //         let res = if self.$reg == 0 {
+        //             std::u8::MAX
+        //         } else {
+        //             self.$reg - 1
+        //         };
+        //         self.cc.z = res == 0;
+        //         self.cc.s = 0x80 == (res & 0x80);
+        //         self.cc.p = _parity(res as u32, std::mem::size_of::<u8>());
+        //         self.$reg = res;
+        //     };
+        // }
 
         macro_rules! DAD {
             ($reglo:ident, $reghi:ident) => {
@@ -325,6 +330,21 @@ impl State8080 {
                     }
                 } else {
                     self.$lo += 1;
+                }
+            };
+        }
+
+        macro_rules! DEC {
+            ($hi:ident, $lo:ident) => {
+                if self.$lo == 0 {
+                    self.$lo = std::u8::MAX;
+                    if self.$hi == 0 {
+                        self.$hi = std::u8::MAX;
+                    } else {
+                        self.$hi -= 1;
+                    }
+                } else {
+                    self.$lo -= 1;
                 }
             };
         }
@@ -528,6 +548,15 @@ impl State8080 {
                 self.b = self.memory.0[self.pc as usize + 2];
                 self.pc += 2;
             }
+            0x02 => {
+                DIS!("STAX B");
+                let offset = (self.b as u16) << 8 | self.c as u16;
+                self.memory.0[offset as usize] = self.a;
+            }
+            0x03 => {
+                DIS!("INX B");
+                INC!(b, c);
+            }
             0x04 => {
                 DIS!("INR B");
                 INR!(b);
@@ -545,6 +574,15 @@ impl State8080 {
             0x09 => {
                 DIS!("DAD ,B");
                 DAD!(b, c);
+            }
+            0x0b => {
+                DIS!("DCX B");
+                DEC!(b, c);
+            }
+            0x0a => {
+                DIS!("LDAX B");
+                let offset = (self.b as u16) << 8 | self.c as u16;
+                self.a = self.memory.0[offset as usize];
             }
             0x0c => {
                 DIS!("INR C");
@@ -571,6 +609,11 @@ impl State8080 {
                 self.d = self.memory.0[(self.pc + 2) as usize];
                 self.pc += 2;
             }
+            0x12 => {
+                DIS!("STAX D");
+                let offset = (self.d as u16) << 8 | self.e as u16;
+                self.memory.0[offset as usize] = self.a;
+            }
             0x13 => {
                 DIS!("INX D");
                 INC!(d, e);
@@ -593,8 +636,12 @@ impl State8080 {
             }
             0x1a => {
                 DIS!("LDAX D");
-                let offset = (self.d as u32) << 8 | self.e as u32;
+                let offset = (self.d as u16) << 8 | self.e as u16;
                 self.a = self.memory.0[offset as usize];
+            }
+            0x1b => {
+                DIS!("DCX D");
+                DEC!(d, e);
             }
             0x1c => {
                 DIS!("INR E");
@@ -612,6 +659,13 @@ impl State8080 {
                 DIS!("LXI H,D16");
                 self.l = self.memory.0[(self.pc + 1) as usize];
                 self.h = self.memory.0[(self.pc + 2) as usize];
+                self.pc += 2;
+            }
+            0x22 => {
+                DIS!("SHLD");
+                let offset = OPS_12_MEM!() as usize;
+                self.memory.0[offset] = self.l;
+                self.memory.0[offset + 1] = self.h;
                 self.pc += 2;
             }
             0x23 => {
@@ -633,6 +687,17 @@ impl State8080 {
             0x29 => {
                 DIS!("DAD H");
                 DAD!(h, l);
+            }
+            0x2a => {
+                DIS!("LHLD");
+                let offset = OPS_12_MEM!() as usize;
+                self.l = self.memory.0[offset];
+                self.h = self.memory.0[offset + 1];
+                self.pc += 2;
+            }
+            0x2b => {
+                DIS!("DCX H");
+                DEC!(h, l);
             }
             0x2c => {
                 DIS!("INR L");
@@ -659,6 +724,19 @@ impl State8080 {
                 self.memory.0[offset as usize] = self.a;
                 self.pc += 2;
             }
+            0x33 => self.sp += 1,
+            0x34 => {
+                DIS!("INR M");
+                let hl_new = DEREF_HL!() + 1;
+                WRITE_HL!(hl_new);
+                self._arithNoCarry(hl_new as u16);
+            }
+            0x35 => {
+                DIS!("DCR M");
+                let hl_new = DEREF_HL!() - 1;
+                WRITE_HL!(hl_new);
+                self._arithNoCarry(hl_new as u16);
+            }
             0x36 => {
                 DIS!("MVI M,D8");
                 let offset = (self.h as u32) << 8 | self.l as u32;
@@ -671,6 +749,10 @@ impl State8080 {
                     | (self.memory.0[(self.pc + 1) as usize] as u32);
                 self.a = self.memory.0[offset as usize];
                 self.pc += 2;
+            }
+            0x3b => {
+                DIS!("DCX SP");
+                self.sp -= 1;
             }
             0x3c => {
                 DIS!("INR A");
