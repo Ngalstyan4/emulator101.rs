@@ -165,7 +165,7 @@ fn _parity(num: u32, size: usize) -> PARITY {
 /* HELPER UTILITY FUNCTIONS END */
 
 impl State8080 {
-    const DISASSEMBLE: bool = true;
+    const DISASSEMBLE: bool = false;
 
     const INSTR_CYCLES: [u8; 256] = [
         4, 10, 7, 5, 5, 5, 7, 4, 4, 10, 7, 5, 5, 5, 7, 4, //0x00..0x0f
@@ -1756,7 +1756,7 @@ fn main() {
         if i < 40000 {
             continue;
         }
-        use std::time::{Duration, Instant};
+        use std::time::Instant;
         let now = Instant::now();
         canvas.clear();
         for (i, p) in framebuffer.iter().enumerate() {
@@ -1772,7 +1772,7 @@ fn main() {
         let mut stdout = stdout1.lock();
         use std::io::Write;
         // std::io::copy(reader: &mut R, writer: &mut W)
-        stdout.write_all(canvas.frame().as_bytes());
+        stdout.write_all(canvas.frame().as_bytes()).unwrap();
         v.push(now.elapsed().as_millis());
         if i > 50000 {
             break;

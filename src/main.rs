@@ -1,11 +1,17 @@
-extern crate drawille;
+#![feature(try_from)]
 
 use std;
 use std::fs;
 mod cpu8080;
 mod screen;
+mod sdl2_screen;
+mod terminal;
 use cpu8080::State8080;
-use screen::Screen;
+
+use crate::screen::Screen;
+use sdl2_screen::Sdl2Screen;
+use terminal::Terminal;
+
 fn main() {
     use std::env;
 
@@ -15,12 +21,32 @@ fn main() {
     let f = fs::read("./rom/invaders").expect("Unable to read ROM file");
     state.load_rom(f);
 
-    // print!("{}[2J", 27 as char);
-    let mut v = Vec::new();
-    let mut screen: Screen = Screen::new();
+    let sdl_context: sdl2::Sdl = sdl2::init().unwrap();
+    let video_subsystem = sdl_context.video().unwrap();
+
+    let window = video_subsystem
+        .window("Space Invaders!", 3 * 224, 3 * 256)
+        .position_centered()
+        .build()
+        .unwrap();
+
+    let event_pump: sdl2::EventPump = sdl_context.event_pump().unwrap();
+
+    let canvas = window.into_canvas().build().unwrap();
+
+    let mut screen = Sdl2Screen::new_from_ctx(canvas, event_pump);
+    screen.clear();
+    screen.render();
     use std::time::Instant;
 
     let mut last_int = Instant::now();
+    std::thread::sleep(Duration::new(0, 4_000_000_000u32));
+    use std::time::Duration;
+    // 'running: loop {
+    //     screen.render();
+    //     std::thread::sleep(Duration::new(0, 1_000_000_000u32/6));
+    // }
+
     for i in 0..=num_instr {
         // print!("{}\t", i);
         let now = Instant::now();
@@ -31,20 +57,44 @@ fn main() {
             last_int = now;
         }
         state.emulate();
-        let framebuffer = state.get_framebuffer();
-
-        if i < 400000 {
+        if i < 50000 {
             continue;
-        }
+        };
+        let framebuffer = state.get_framebuffer();
         screen.clear();
         screen.update(framebuffer);
         screen.render();
-        v.push(now.elapsed().as_millis());
-        // if i > 50000 {
-        //     break;
-        // }
     }
-
-    print!("{}[2J", 27 as char);
-    print!("{:?}", v);
 }
+
+// extern crate sdl2;
+
+// use sdl2::pixels::Color;
+// use sdl2::event::Event;
+// use sdl2::keyboard::Keycode;
+// use std::time::Duration;
+
+// pub fn main() {
+//     let sdl_context = sdl2::init().unwrap();
+//     let video_subsystem = sdl_context.video().unwrap();
+//     let window = video_subsystem.window("rust-sdl2 demo", 800, 600)
+//         .position_centered()
+//         .build()
+//         .unwrap();
+//     let mut canvas = window.into_canvas().build().unwrap();
+//     let mut event_pump = sdl_context.event_pump().unwrap();
+//     window.drop
+//     canvas.present();
+
+//     for event in event_pump.poll_iter() {
+//         match event {
+//             Event::Quit {..} |
+//             Event::KeyDown { keycode: Some(Keycode::Escape), .. } => {
+//             std::process::exit(0);
+//             },
+//             _ => {}
+//         }
+//     }
+//     // canvas.clear();
+//     ::std::thread::sleep(Duration::new(0, 4_000_000_000u32));
+//     }
