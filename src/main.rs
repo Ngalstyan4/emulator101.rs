@@ -5,12 +5,14 @@ use std::fs;
 mod cpu8080;
 mod screen;
 mod sdl2_screen;
-mod terminal;
+// mod terminal;
+
+mod soc;
 use cpu8080::State8080;
 
 use crate::screen::Screen;
 use sdl2_screen::Sdl2Screen;
-use terminal::Terminal;
+// use terminal::Terminal;
 
 fn main() {
     use std::env;
@@ -40,20 +42,19 @@ fn main() {
     use std::time::Instant;
 
     let mut last_int = Instant::now();
-    std::thread::sleep(Duration::new(0, 4_000_000_000u32));
     use std::time::Duration;
     // 'running: loop {
     //     screen.render();
     //     std::thread::sleep(Duration::new(0, 1_000_000_000u32/6));
     // }
-
+    let mut int = 1;
     for i in 0..=num_instr {
         // print!("{}\t", i);
         let now = Instant::now();
-
-        if last_int.elapsed().as_millis() < now.elapsed().as_millis() + 16 {
-            state.interrupt(1);
-            state.interrupt(2);
+        if last_int.elapsed().as_millis() < now.elapsed().as_millis() + 8000 {
+            state.interrupt(int);
+            int = 1+ int % 2;
+            // state.interrupt(2);
             last_int = now;
         }
         state.emulate();
@@ -63,7 +64,7 @@ fn main() {
         let framebuffer = state.get_framebuffer();
         screen.clear();
         screen.update(framebuffer);
-        screen.render();
+        state.set_port(screen.render());
     }
 }
 

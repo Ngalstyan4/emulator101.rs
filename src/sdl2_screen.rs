@@ -85,8 +85,11 @@ impl Screen for Sdl2Screen {
         }
     }
     // todo:: Q:: why does sdl require mutable reference for rendering??
-    fn render(&mut self) {
+    fn render(&mut self) -> u8 {
+        let mut ret:u8 = 0;
+
         for event in self.event_handler.poll_iter() {
+
             match event {
                 Event::Quit { .. }
                 | Event::KeyDown {
@@ -94,14 +97,54 @@ impl Screen for Sdl2Screen {
                     ..
                 } => {
                     std::process::exit(0);
+                },
+                Event::KeyDown{
+                    keycode:Some(Keycode::Left),
+                    ..
+                } => {
+                    ret = 0x20;
+                },
+                Event::KeyDown{
+                    keycode:Some(Keycode::Right),
+                    ..
+                } => {
+                    ret = 0x40;
                 }
+                Event::KeyDown{
+                    keycode:Some(Keycode::C),
+                    ..
+                } => {
+                    ret = 0x1;
+                }
+                Event::KeyDown{
+                    keycode:Some(Keycode::Space),
+                    ..
+                } => {
+                    ret = 0x10;
+                }
+                Event::KeyDown{
+                    keycode:Some(Keycode::S),
+                    ..
+                } => {
+                    ret = 0x04;
+                }
+                Event::KeyUp{
+                    ..
+                } => {
+                    ret = 0;
+                }
+
+
+                
                 _ => {}
             }
         }
         self.canvas.present();
+        return ret;
+
         // let ten_millis = time::Duration::from_millis(10);
         // let now = time::Instant::now();
-        std::thread::sleep(Duration::new(0, 1_000_000_000u32 / 60))
+        // std::thread::sleep(Duration::new(0, 1_00u32 / 60))
 
         // thread::sleep(ten_millis);
     }
