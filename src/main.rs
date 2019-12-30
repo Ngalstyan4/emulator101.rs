@@ -18,7 +18,7 @@ fn main() {
     use std::env;
 
     let args: Vec<String> = env::args().collect();
-    let num_instr = args[1].parse().unwrap_or(50000);
+    let num_instr = args[1].parse().unwrap_or(50000004);
     let state: &mut State8080 = &mut Default::default();
     let f = fs::read("./rom/invaders").expect("Unable to read ROM file");
     state.load_rom(f);
@@ -48,23 +48,27 @@ fn main() {
     //     std::thread::sleep(Duration::new(0, 1_000_000_000u32/6));
     // }
     let mut int = 1;
+    let mut top = true;
     for i in 0..=num_instr {
         // print!("{}\t", i);
         let now = Instant::now();
-        if last_int.elapsed().as_millis() < now.elapsed().as_millis() + 8000 {
-            state.interrupt(int);
-            int = 1+ int % 2;
-            // state.interrupt(2);
+        if last_int.elapsed().as_millis() > 8 {
+            if state.interrupt(int) {
+                int = 1 + int % 2;
+                top = !top;
+                let framebuffer = state.get_framebuffer();
+                screen.clear();
+                screen.update(framebuffer, top);
+                state.set_port(screen.render());
+            }
+
+            // println!("interupt is {}", int);
             last_int = now;
         }
         state.emulate();
         if i < 50000 {
             continue;
         };
-        let framebuffer = state.get_framebuffer();
-        screen.clear();
-        screen.update(framebuffer);
-        state.set_port(screen.render());
     }
 }
 

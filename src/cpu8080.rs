@@ -127,9 +127,9 @@ pub struct State8080 {
     cycles: u64,
     //todo move elsewhere
     port: u8,
-    shift0:u8,
-    shift1:u8,
-    shift_offset:u8,
+    shift0: u8,
+    shift1: u8,
+    shift_offset: u8,
 }
 
 impl std::fmt::Debug for State8080 {
@@ -189,13 +189,16 @@ impl State8080 {
     ];
 
     /*TODO :::: move these to invader specific code*/
-    pub fn    set_port(&mut self, port:u8) {
+    pub fn set_port(&mut self, port: u8) {
         self.port = port;
+        if port != 0 {
+            println!{"port is {:x}", self.port}
+        }
     }
 
-    pub fn port_in(&mut self, port:u8) {
-        self.port = port;
-    }
+    // pub fn port_in(&mut self, port:u8) {
+    //     self.port = port;
+    // }
     pub fn load_rom(&mut self, f: Vec<u8>) {
         for (i, c) in f.iter().enumerate() {
             if cfg!(test) {
@@ -229,16 +232,17 @@ impl State8080 {
         &self.memory.0[0x2400..=0x3FFF]
     }
 
-    pub fn interrupt(&mut self, interrupt_num: u8) {
+    pub fn interrupt(&mut self, interrupt_num: u8) -> bool {
         if self.int_enable == false {
-            return;
+            return false;
         }
         //perform "PUSH PC"
-        self.memory.0[(self.sp - 1) as usize] = (self.pc & 0xff00 >> 8) as u8;
+        self.memory.0[(self.sp - 1) as usize] = ((self.pc & 0xff00) >> 8) as u8;
         self.memory.0[(self.sp - 2) as usize] = (self.pc & 0xff) as u8;
         self.sp -= 2;
         self.pc = 8 * interrupt_num as u16;
         self.int_enable = false;
+        return true
     }
 
     fn _LogicFlagsA(&mut self) {
@@ -719,6 +723,18 @@ impl State8080 {
                 DIS!("MVI H,D8");
                 MOVRI!(h);
             }
+            0x27 => {
+                DIS!("DAA SPECIAL BCD");
+                if self.a &0xf > 9 {
+                    self.a += 6;
+                }
+                if self.a & 0xf0 > 0x90
+                {
+                    let res =  self.a as u16 + 0x60;
+                    self.a = (res & 0xff) as u8;
+                    self._arithFlagsA(res);
+                }
+            }
             0x29 => {
                 DIS!("DAD H");
                 DAD!(h, l);
@@ -775,7 +791,7 @@ impl State8080 {
             }
             0x35 => {
                 DIS!("DCR M");
-                let hl_new = SUB!(DEREF_HL!(),1);
+                let hl_new = SUB!(DEREF_HL!(), 1);
                 WRITE_HL!(hl_new);
                 self._arithNoCarry(hl_new as u16);
             }
@@ -1549,11 +1565,17 @@ impl State8080 {
             }
             0xd3 => {
                 DIS!("OUT D8");
-                let arg = self.memory.0[(self.pc + 1)as usize];
+                let arg = self.memory.0[(self.pc + 1) as usize];
+                println!("out arg is {}", arg);
                 match arg {
-                    2 => {self.shift_offset = self.a & 0x7;}
-                    4 => {self.shift0 = self.shift1; self.shift1 = self.a;}
-                    _ => println!("Ignore OUT {}", arg)
+                    2 => {
+                        self.shift_offset = self.a & 0x7;
+                    }
+                    4 => {
+                        self.shift0 = self.shift1;
+                        self.shift1 = self.a;
+                    }
+                    _ => println!("Ignore OUT {}", arg),
                 }
                 self.pc += 1; /* not really implemented yet todo::*/
             }
@@ -1585,21 +1607,24 @@ impl State8080 {
             }
             0xdb => {
                 DIS!("IN D8");
-                let arg = self.memory.0[(self.pc + 1)as usize];
+                let arg = self.memory.0[(self.pc + 1) as usize];
                 println!("arg is {}", arg);
 
                 match arg {
                     // 0 => std::process::exit(1),
-                    1 => {self.a = 0x04},
-                    2 => {self.a = self.port;},
-                    3 => {
-                        let v = ((self.shift1 as u16) <<8) | self.shift0 as u16;
-                        self.a = (v >> (8-self.shift_offset)) as u8;
+                    1 => self.a = 0x04,
+                    2 => {
+                        self.a = self.port;
                     }
-                    _ => println!("Ignored IN {}", arg)
+                    // 2 => {self.a = 0},
+                    3 => {
+                        let v = ((self.shift1 as u16) << 8) | self.shift0 as u16;
+                        self.a = (v >> (8 - self.shift_offset)) as u8;
+                    }
+                    _ => println!("Ignored IN {}", arg),
                 };
                 // self.a = S.tate8080::port_in(self.memory.0[(self.pc + 1) as usize]);
-                self.pc += 2;
+                self.pc += 1;
             }
             0xdc => {
                 DIS!("CC {:0>4x}", OPS_12_MEM!());

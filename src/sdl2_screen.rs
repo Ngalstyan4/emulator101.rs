@@ -36,6 +36,21 @@ impl Sdl2Screen {
     }
 }
 
+impl Sdl2Screen {
+    fn draw_elems<'a>(&mut self, elems: Vec<(usize, &'a u8)>, c:Color) {
+        for (i, p) in elems {
+            for ii in (0..8).rev() {
+                let ind = i * 8 + 8 - ii;
+                if *p & 1 << ii != 0 {
+                    self.canvas
+                        .draw_point(Point::new((ind / 256) as i32, (ind % 256) as i32))
+                        .unwrap();
+                }
+            }
+        }
+    }
+}
+
 impl Screen for Sdl2Screen {
     //todo Q:: this is broken as the context gets dropped at the end of the call while we need it for canvas
     // Is this a bug of the package or something I will have to account for in another way?
@@ -71,25 +86,21 @@ impl Screen for Sdl2Screen {
         self.canvas.set_draw_color(self.background_color);
         self.canvas.clear();
     }
-    fn update(&mut self, framebuffer: &[u8]) {
+
+    fn update(&mut self, framebuffer: &[u8], top: bool) {
         self.canvas.set_draw_color(self.foreground_color);
-        for (i, p) in framebuffer.iter().enumerate() {
-            for ii in (0..8).rev() {
-                let ind = i * 8 + 8 - ii;
-                if *p & 1 << ii != 0 {
-                    self.canvas
-                        .draw_point(Point::new((ind / 256) as i32, (ind % 256) as i32))
-                        .unwrap();
-                }
-            }
-        }
+        // Q:: Can I avoid collecting the vector? and pass an iterator instead?
+        let elems = framebuffer.iter().enumerate().collect::<Vec<_>>();
+        // let ala: &std::iter::Iterator<Item=&u8> = &[1,2,3,4].iter();
+        // ala.enumerate();
+        // let elems = (*ala).enumerate();
+        self.draw_elems(elems, self.background_color);
     }
     // todo:: Q:: why does sdl require mutable reference for rendering??
     fn render(&mut self) -> u8 {
-        let mut ret:u8 = 0;
+        let mut ret: u8 = 0;
 
         for event in self.event_handler.poll_iter() {
-
             match event {
                 Event::Quit { .. }
                 | Event::KeyDown {
@@ -97,45 +108,41 @@ impl Screen for Sdl2Screen {
                     ..
                 } => {
                     std::process::exit(0);
-                },
-                Event::KeyDown{
-                    keycode:Some(Keycode::Left),
+                }
+                Event::KeyDown {
+                    keycode: Some(Keycode::Left),
                     ..
                 } => {
                     ret = 0x20;
-                },
-                Event::KeyDown{
-                    keycode:Some(Keycode::Right),
+                }
+                Event::KeyDown {
+                    keycode: Some(Keycode::Right),
                     ..
                 } => {
                     ret = 0x40;
                 }
-                Event::KeyDown{
-                    keycode:Some(Keycode::C),
+                Event::KeyDown {
+                    keycode: Some(Keycode::C),
                     ..
                 } => {
                     ret = 0x1;
                 }
-                Event::KeyDown{
-                    keycode:Some(Keycode::Space),
+                Event::KeyDown {
+                    keycode: Some(Keycode::Space),
                     ..
                 } => {
                     ret = 0x10;
                 }
-                Event::KeyDown{
-                    keycode:Some(Keycode::S),
+                Event::KeyDown {
+                    keycode: Some(Keycode::S),
                     ..
                 } => {
                     ret = 0x04;
                 }
-                Event::KeyUp{
-                    ..
-                } => {
-                    ret = 0;
-                }
+                // Event::KeyUp { .. } => {
+                //     ret = 0;
+                // }
 
-
-                
                 _ => {}
             }
         }
