@@ -90,7 +90,7 @@ impl Screen for Sdl2Screen {
     fn update(&mut self, framebuffer: &[u8], top: bool) {
         self.canvas.set_draw_color(self.foreground_color);
         // Q:: Can I avoid collecting the vector? and pass an iterator instead?
-        let elems = framebuffer.iter().enumerate().collect::<Vec<_>>();
+        let elems = framebuffer.iter().enumerate().filter(|&(i, &v)| (i *8 % 256 < 112 )== top).collect::<Vec<_>>();
         // let ala: &std::iter::Iterator<Item=&u8> = &[1,2,3,4].iter();
         // ala.enumerate();
         // let elems = (*ala).enumerate();

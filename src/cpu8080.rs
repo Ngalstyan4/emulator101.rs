@@ -190,8 +190,8 @@ impl State8080 {
 
     /*TODO :::: move these to invader specific code*/
     pub fn set_port(&mut self, port: u8) {
-        self.port = port;
         if port != 0 {
+            self.port = port;
             println!{"port is {:x}", self.port}
         }
     }
@@ -1566,7 +1566,7 @@ impl State8080 {
             0xd3 => {
                 DIS!("OUT D8");
                 let arg = self.memory.0[(self.pc + 1) as usize];
-                println!("out arg is {}", arg);
+                // println!("out arg is {}", arg);
                 match arg {
                     2 => {
                         self.shift_offset = self.a & 0x7;
@@ -1575,6 +1575,8 @@ impl State8080 {
                         self.shift0 = self.shift1;
                         self.shift1 = self.a;
                     }
+                    6 => {},
+                    3 => {},
                     _ => println!("Ignore OUT {}", arg),
                 }
                 self.pc += 1; /* not really implemented yet todo::*/
@@ -1608,20 +1610,20 @@ impl State8080 {
             0xdb => {
                 DIS!("IN D8");
                 let arg = self.memory.0[(self.pc + 1) as usize];
-                println!("arg is {}", arg);
-
+                println!("IN arg is {}", arg);
+                // self.a = 0;
                 match arg {
-                    // 0 => std::process::exit(1),
-                    1 => self.a = 0x04,
+                    0 => self.a = 1,
+                    1 => self.a = self.port,
                     2 => {
-                        self.a = self.port;
+                        self.a = 1;//self.port;
                     }
                     // 2 => {self.a = 0},
                     3 => {
                         let v = ((self.shift1 as u16) << 8) | self.shift0 as u16;
                         self.a = (v >> (8 - self.shift_offset)) as u8;
-                    }
-                    _ => println!("Ignored IN {}", arg),
+                    },
+                    _ => self.a = 0,//println!("Ignored IN {}", arg),
                 };
                 // self.a = S.tate8080::port_in(self.memory.0[(self.pc + 1) as usize]);
                 self.pc += 1;

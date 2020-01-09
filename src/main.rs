@@ -49,10 +49,10 @@ fn main() {
     // }
     let mut int = 1;
     let mut top = true;
-    for i in 0..=num_instr {
+    loop {
         // print!("{}\t", i);
         let now = Instant::now();
-        if last_int.elapsed().as_millis() > 8 {
+        if last_int.elapsed().as_millis() > 1 {
             if state.interrupt(int) {
                 int = 1 + int % 2;
                 top = !top;
@@ -66,9 +66,6 @@ fn main() {
             last_int = now;
         }
         state.emulate();
-        if i < 50000 {
-            continue;
-        };
     }
 }
 
